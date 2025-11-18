@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+
+{% block title %}Business Optimization - Sales Strategist{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Business Optimization</h1>
+        <p class="lead">Optimize manufacturing and resource allocation with data-driven recommendations</p>
+    </div>
+</div>
+
+<!-- Alert Container -->
+<div id="alertContainer"></div>
+
+<!-- Input Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="bi bi-sliders"></i> Product Portfolio & Constraints</h5>
+            </div>
+            <div class="card-body">
+                <form id="optimizationForm">
+                    <div class="mb-3">
+                        <label for="productsData" class="form-label">Products Data (JSON)</label>
+                        <textarea class="form-control" id="productsData" rows="8" 
+                                  placeholder='[{"name": "Product A", "demand": 100, "cost": 50, "price": 80, ...}]'></textarea>
+                        <div class="form-text">Enter product portfolio data as JSON array</div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="budgetLimit" class="form-label">Budget Limit ($)</label>
+                            <input type="number" class="form-control" id="budgetLimit" 
+                                   value="1000000" min="0" step="1000">
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="capacityLimit" class="form-label">Production Capacity (units)</label>
+                            <input type="number" class="form-control" id="capacityLimit" 
+                                   value="10000" min="0" step="100">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Optimization Objectives</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="maxRevenue" checked>
+                            <label class="form-check-label" for="maxRevenue">
+                                Maximize Revenue
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="minCost" checked>
+                            <label class="form-check-label" for="minCost">
+                                Minimize Production Cost
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-danger btn-lg">
+                        <i class="bi bi-gear-fill"></i> Optimize Portfolio
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-lg" onclick="loadSamplePortfolio()">
+                        <i class="bi bi-file-earmark-text"></i> Load Sample
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Results Section -->
+<div id="resultsSection" style="display: none;">
+    <!-- Summary Metrics -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="metric-card">
+                <p class="metric-label">Total Revenue</p>
+                <h2 class="metric-value" id="totalRevenue">-</h2>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                <p class="metric-label">Total Cost</p>
+                <h2 class="metric-value" id="totalCost">-</h2>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                <p class="metric-label">Net Profit</p>
+                <h2 class="metric-value" id="netProfit">-</h2>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                <p class="metric-label">ROI</p>
+                <h2 class="metric-value" id="roi">-</h2>
+            </div>
+        </div>
+    </div>
+
+    <!-- Production Priority Matrix -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-grid-3x3"></i> Production Priority Matrix</h5>
+                    <button class="btn btn-sm btn-light" onclick="downloadPriorityMatrix()">
+                        <i class="bi bi-download"></i> Export
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="priorityMatrix" class="chart-container-lg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Resource Distribution -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Production Allocation</h5>
+                </div>
+                <div class="card-body">
+                    <div id="productionAllocationChart" class="chart-container"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header bg-warning text-white">
+                    <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Resource Distribution</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="resourceDistributionChart" class="chart-container"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recommended Production Table -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="bi bi-table"></i> Recommended Production Quantities</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover data-table" id="productionTable">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Recommended Qty</th>
+                                    <th>Expected Revenue</th>
+                                    <th>Production Cost</th>
+                                    <th>Profit Margin</th>
+                                    <th>Priority</th>
+                                </tr>
+                            </thead>
+                            <tbody id="productionTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scenario Comparison -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0"><i class="bi bi-bar-chart-line"></i> Scenario Comparison</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="scenarioComparisonChart" class="chart-container-lg"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Constraint Editor -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0"><i class="bi bi-sliders"></i> What-If Analysis</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="whatIfBudget" class="form-label">Budget Adjustment (%)</label>
+                            <input type="range" class="form-range" id="whatIfBudget" 
+                                   min="-50" max="50" step="5" value="0">
+                            <div class="form-text">Current: <span id="whatIfBudgetValue">0</span>%</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="whatIfCapacity" class="form-label">Capacity Adjustment (%)</label>
+                            <input type="range" class="form-range" id="whatIfCapacity" 
+                                   min="-50" max="50" step="5" value="0">
+                            <div class="form-text">Current: <span id="whatIfCapacityValue">0</span>%</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="whatIfDemand" class="form-label">Demand Adjustment (%)</label>
+                            <input type="range" class="form-range" id="whatIfDemand" 
+                                   min="-50" max="50" step="5" value="0">
+                            <div class="form-text">Current: <span id="whatIfDemandValue">0</span>%</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="runWhatIfAnalysis()">
+                        <i class="bi bi-play-fill"></i> Run What-If Analysis
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('dashboard.static', filename='js/business-optimization.js') }}"></script>
+{% endblock %}

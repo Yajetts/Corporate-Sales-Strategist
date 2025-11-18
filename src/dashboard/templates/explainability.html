@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Model Explainability - Sales Strategist{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Model Explainability</h1>
+        <p class="lead">Understand system recommendations with SHAP-based explanations and feature importance</p>
+    </div>
+</div>
+
+<!-- Alert Container -->
+<div id="alertContainer"></div>
+
+<!-- Model Selection -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-cpu"></i> Select Model for Explanation</h5>
+            </div>
+            <div class="card-body">
+                <form id="explainabilityForm">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="modelType" class="form-label">Model Type</label>
+                            <select class="form-select" id="modelType">
+                                <option value="strategy_rl">Strategy Engine (RL Agent)</option>
+                                <option value="performance_lstm">Performance Governor (LSTM)</option>
+                                <option value="business_regression">Business Manager (Regression)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="explanationType" class="form-label">Explanation Type</label>
+                            <select class="form-select" id="explanationType">
+                                <option value="local">Local (Single Prediction)</option>
+                                <option value="global">Global (Overall Model)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="predictionData" class="form-label">Prediction Data (JSON)</label>
+                        <textarea class="form-control" id="predictionData" rows="5" 
+                                  placeholder='{"feature1": 0.5, "feature2": 0.7, ...}'></textarea>
+                        <div class="form-text">Enter the prediction data as JSON</div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-info btn-lg">
+                        <i class="bi bi-search"></i> Generate Explanation
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-lg" onclick="loadSampleExplanation()">
+                        <i class="bi bi-file-earmark-text"></i> Load Sample
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Results Section -->
+<div id="resultsSection" style="display: none;">
+    <!-- Feature Importance Ranking -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Feature Importance Ranking</h5>
+                    <button class="btn btn-sm btn-light" onclick="downloadFeatureImportance()">
+                        <i class="bi bi-download"></i> Export
+                    </button>
+                </div>
+                <div class="card-body">
+                    <canvas id="featureImportanceChart" class="chart-container"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SHAP Bar Chart -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-bar-chart-fill"></i> SHAP Values (Bar Chart)</h5>
+                </div>
+                <div class="card-body">
+                    <div id="shapBarChart" class="chart-container-lg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SHAP Force Plot -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-warning text-white">
+                    <h5 class="mb-0"><i class="bi bi-arrow-left-right"></i> SHAP Force Plot</h5>
+                </div>
+                <div class="card-body">
+                    <div id="shapForcePlot" class="chart-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SHAP Waterfall Chart -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0"><i class="bi bi-water"></i> SHAP Waterfall Chart</h5>
+                </div>
+                <div class="card-body">
+                    <div id="shapWaterfallChart" class="chart-container-lg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Influential Features Table -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0"><i class="bi bi-list-ol"></i> Top 10 Influential Features</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover data-table" id="influentialFeaturesTable">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Feature Name</th>
+                                    <th>SHAP Value</th>
+                                    <th>Contribution</th>
+                                    <th>Impact</th>
+                                </tr>
+                            </thead>
+                            <tbody id="influentialFeaturesBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Options -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0"><i class="bi bi-download"></i> Export Options</h5>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-primary me-2" onclick="exportExplanationPDF()">
+                        <i class="bi bi-file-pdf"></i> Export as PDF
+                    </button>
+                    <button class="btn btn-secondary me-2" onclick="exportExplanationPNG()">
+                        <i class="bi bi-file-image"></i> Export as PNG
+                    </button>
+                    <button class="btn btn-info" onclick="exportExplanationJSON()">
+                        <i class="bi bi-file-code"></i> Export as JSON
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('dashboard.static', filename='js/explainability.js') }}"></script>
+{% endblock %}

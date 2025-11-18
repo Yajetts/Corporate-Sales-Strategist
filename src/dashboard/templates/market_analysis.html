@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Market Analysis - Sales Strategist{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Market Analysis</h1>
+        <p class="lead">Identify customer segments and market relationships using advanced analysis</p>
+    </div>
+</div>
+
+<!-- Alert Container -->
+<div id="alertContainer"></div>
+
+<!-- Input Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-upload"></i> Upload Market Data</h5>
+            </div>
+            <div class="card-body">
+                <form id="marketAnalysisForm">
+                    <div class="mb-3">
+                        <label for="marketDataFile" class="form-label">Upload CSV or JSON file</label>
+                        <input type="file" class="form-control" id="marketDataFile" accept=".csv,.json">
+                        <div class="form-text">Upload market data with entity features (CSV or JSON format)</div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="autoSelectClusters" class="form-label">Auto-select Clusters</label>
+                            <select class="form-select" id="autoSelectClusters">
+                                <option value="true" selected>Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-4 mb-3">
+                            <label for="similarityThreshold" class="form-label">Similarity Threshold</label>
+                            <input type="range" class="form-range" id="similarityThreshold" 
+                                   min="0" max="1" step="0.1" value="0.7">
+                            <div class="form-text">Current: <span id="similarityValue">0.7</span></div>
+                        </div>
+                        
+                        <div class="col-md-4 mb-3">
+                            <label for="topKLinks" class="form-label">Top K Links</label>
+                            <input type="number" class="form-control" id="topKLinks" 
+                                   min="1" max="100" value="20">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-play-fill"></i> Analyze Market
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="loadSampleData()">
+                        <i class="bi bi-file-earmark-text"></i> Load Sample Data
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Results Section -->
+<div id="resultsSection" style="display: none;">
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-body text-center">
+                    <h6 class="text-muted">Total Entities</h6>
+                    <h2 id="totalEntities" class="mb-0">-</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-body text-center">
+                    <h6 class="text-muted">Clusters Found</h6>
+                    <h2 id="totalClusters" class="mb-0">-</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-body text-center">
+                    <h6 class="text-muted">Graph Nodes</h6>
+                    <h2 id="graphNodes" class="mb-0">-</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-body text-center">
+                    <h6 class="text-muted">Graph Edges</h6>
+                    <h2 id="graphEdges" class="mb-0">-</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer Clusters Visualization -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Customer Clusters</h5>
+                    <button class="btn btn-sm btn-light" onclick="downloadChartAsPNG('clusterChart', 'customer_clusters.png')">
+                        <i class="bi bi-download"></i> Export
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="clusterChart" class="chart-container-lg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Demand Graphs -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Cluster Size Distribution</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="clusterSizeChart" class="chart-container"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card shadow-sm">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="bi bi-graph-up"></i> Cluster Metrics</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="clusterMetricsChart" class="chart-container"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Competitor Map Visualization -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-warning text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-diagram-3"></i> Market Relationship Graph</h5>
+                    <div>
+                        <button class="btn btn-sm btn-light me-2" onclick="resetGraphZoom()">
+                            <i class="bi bi-arrows-angle-contract"></i> Reset Zoom
+                        </button>
+                        <button class="btn btn-sm btn-light" onclick="downloadGraphData()">
+                            <i class="bi bi-download"></i> Export Data
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="graphVisualization" class="chart-container-lg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Potential Clients Table -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0"><i class="bi bi-people"></i> Potential Clients</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover data-table" id="potentialClientsTable">
+                            <thead>
+                                <tr>
+                                    <th>Entity ID</th>
+                                    <th>Cluster ID</th>
+                                    <th>Connectivity Score</th>
+                                    <th>Priority</th>
+                                </tr>
+                            </thead>
+                            <tbody id="potentialClientsBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('dashboard.static', filename='js/market-analysis.js') }}"></script>
+{% endblock %}

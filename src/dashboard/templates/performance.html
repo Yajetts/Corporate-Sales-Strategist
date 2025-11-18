@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}Performance Monitoring - Sales Strategist{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Performance Monitoring</h1>
+        <p class="lead">Monitor sales performance with LSTM forecasting and real-time anomaly detection</p>
+    </div>
+</div>
+
+<!-- Alert Container -->
+<div id="alertContainer"></div>
+
+<!-- Input Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-warning text-white">
+                <h5 class="mb-0"><i class="bi bi-upload"></i> Upload Performance Data</h5>
+            </div>
+            <div class="card-body">
+                <form id="performanceForm">
+                    <div class="mb-3">
+                        <label for="performanceDataFile" class="form-label">Upload Historical Data (CSV or JSON)</label>
+                        <input type="file" class="form-control" id="performanceDataFile" accept=".csv,.json">
+                        <div class="form-text">Upload time-series sales data for forecasting</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="includeFeedback" checked>
+                            <label class="form-check-label" for="includeFeedback">
+                                Include feedback loop analysis
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-warning">
+                        <i class="bi bi-play-fill"></i> Analyze Performance
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="loadSamplePerformanceData()">
+                        <i class="bi bi-file-earmark-text"></i> Load Sample Data
+                    </button>
+                    <button type="button" class="btn btn-info" onclick="enableRealTimeUpdates()">
+                        <i class="bi bi-arrow-repeat"></i> Enable Real-Time Updates
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Results Section -->
+<div id="resultsSection" style="display: none;">
+    <!-- Alert Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card shadow-sm border-danger">
+                <div class="card-body text-center">
+                    <h6 class="text-muted">Critical Alerts</h6>
+                    <h2 id="criticalAlerts" class="mb-0 text-danger">-</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm border-warning">
+                <div class="card-body text-center">
+                    <h6 class="text-muted">High Alerts</h6>
+                    <h2 id="highAlerts" class="mb-0 text-warning">-</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm border-info">
+                <div class="card-body text-center">
+                    <h6 class="text-muted">Medium Alerts</h6>
+                    <h2 id="mediumAlerts" class="mb-0 text-info">-</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm border-secondary">
+                <div class="card-body text-center">
+                    <h6 class="text-muted">Low Alerts</h6>
+                    <h2 id="lowAlerts" class="mb-0 text-secondary">-</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LSTM Trend Chart -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-graph-up"></i> Sales Trend Forecast</h5>
+                    <div>
+                        <span class="badge bg-light text-dark me-2">
+                            <i class="bi bi-clock"></i> Last Updated: <span id="lastUpdated">-</span>
+                        </span>
+                        <button class="btn btn-sm btn-light" onclick="downloadChartAsPNG('trendChart', 'sales_forecast.png')">
+                            <i class="bi bi-download"></i> Export
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <canvas id="trendChart" class="chart-container-lg"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trend Analysis -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-bar-chart-line"></i> Trend Analysis</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <h6 class="text-muted">Historical Trend</h6>
+                            <h3 id="historicalTrend">-</h3>
+                        </div>
+                        <div class="col-md-3">
+                            <h6 class="text-muted">Forecast Trend</h6>
+                            <h3 id="forecastTrend">-</h3>
+                        </div>
+                        <div class="col-md-3">
+                            <h6 class="text-muted">Trend Outlook</h6>
+                            <h3 id="trendOutlook">-</h3>
+                        </div>
+                        <div class="col-md-3">
+                            <h6 class="text-muted">Forecast vs Current</h6>
+                            <h3 id="forecastVsCurrent">-</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Anomaly Alerts Dashboard -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Anomaly Alerts</h5>
+                    <button class="btn btn-sm btn-light" onclick="refreshAlerts()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="alertsContainer">
+                        <p class="text-muted text-center">No alerts to display</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feedback Summary -->
+    <div id="feedbackSection" class="row mb-4" style="display: none;">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="bi bi-arrow-repeat"></i> Feedback Loop Summary</h5>
+                </div>
+                <div class="card-body">
+                    <div id="feedbackContent">
+                        <p class="text-muted">No feedback data available</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('dashboard.static', filename='js/performance.js') }}"></script>
+{% endblock %}
