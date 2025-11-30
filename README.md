@@ -26,6 +26,9 @@ Corporate Sales Strategist addresses these challenges using modern neural archit
 
 The platform is composed of six specialized neural modules, each covering a critical component of the sales intelligence workflow.
 
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/3dfaba19-b538-4032-a796-7eb0180b5584" />
+
+
 ### 1. Enterprise Analyst (BERT Encoder)
 **Focus:** Company & Product Understanding
 
@@ -157,5 +160,6 @@ Enhances trust and auditability in enterprise environments.
 - Matplotlib / Seaborn (for analysis)
 
 ---
+
 
 > This README has been converted to structured Markdown for clarity and easier navigation.
