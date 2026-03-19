@@ -251,18 +251,15 @@ See deployment notes in:
 
 ## Tech Stack
 
-- Python, Flask, Celery
-- PostgreSQL, MongoDB, Redis
-- PyTorch, NumPy, Pandas, scikit-learn
-- SHAP-based explainability patterns
-- Markdown + PDF artifact generation for reporting
+**Languages & Frameworks:**
 
-## Notes
+- Python
+- PyTorch
+- Scikit-Learn
+- NumPy & Pandas
+- NetworkX / PyTorch Geometric
+- Matplotlib / Seaborn (for analysis)
 
-- Some advanced model paths/checkpoints are optional in development.
-- Dashboard and post-analysis components are designed to degrade gracefully when optional infra is unavailable.
-- For minimal Docker images, use the provided split requirement files (`requirements.docker.txt`, `requirements.worker.txt`).
+---
 
-## License
-
-See `LICENSE`.
+> This README has been converted to structured Markdown for clarity and easier navigation.
