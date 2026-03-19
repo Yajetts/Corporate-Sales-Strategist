@@ -70,7 +70,10 @@ Purpose: explainability and confidence context.
 
 ## Analysis Overview (Post-Analysis)
 
-A newly added Post-Analysis capability now aggregates module outputs into a single executive report and optional audio summary.
+A Post-Analysis capability that aggregates module outputs into a single executive report and optional audio summary.
+
+<img width="1918" height="980" alt="css image2" src="https://github.com/user-attachments/assets/2c53e835-8d84-45a4-a13c-76573226f0de" />
+
 
 ### What it does
 
