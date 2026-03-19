@@ -1,11 +1,17 @@
 """Main Flask application for Sales Strategist API"""
 
 import logging
+import os
+import uuid
 from flask import Flask, jsonify
 from flask_cors import CORS
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # optional at runtime; declared in requirements
+    load_dotenv = None
 from src.utils.config import Config, get_config
-from src.api.routes import api_bp
-from src.api.async_routes import async_bp
+from src.api.post_analysis_routes import post_analysis_bp
 from src.dashboard.routes import dashboard_bp
 from src.api.health import health_bp
 from src.api.middleware import request_id_middleware, error_handler_middleware
@@ -31,7 +37,17 @@ def create_app(config_name=None):
     Returns:
         Configured Flask application
     """
+    # Load local env files early so config + integrations (LLM, DB, etc.) work in dev.
+    if load_dotenv is not None:
+        load_dotenv(dotenv_path=os.getenv("ENV_FILE", ".env"), override=False)
+        load_dotenv(dotenv_path=os.getenv("FLASK_ENV_FILE", ".flaskenv"), override=False)
+
     app = Flask(__name__)
+
+    # Unique per-process identifier used to tag cached module outputs.
+    # This lets the dashboard reliably detect "modules ran in this session"
+    # without being fooled by stale JSON artifacts on disk.
+    app.config["BOOT_ID"] = uuid.uuid4().hex
     
     # Load configuration
     config = get_config(config_name)
@@ -56,29 +72,53 @@ def create_app(config_name=None):
     
     # Register blueprints
     api_prefix = config.API_PREFIX
-    app.register_blueprint(api_bp, url_prefix=api_prefix)
-    app.register_blueprint(async_bp, url_prefix=f'{api_prefix}/async')
+
+    enable_core_routes = os.getenv('API_ENABLE_CORE_ROUTES', '1').strip().lower() not in {'0', 'false', 'no'}
+    enable_async_routes = os.getenv('API_ENABLE_ASYNC_ROUTES', '1').strip().lower() not in {'0', 'false', 'no'}
+    enable_swagger = os.getenv('API_ENABLE_SWAGGER', '1').strip().lower() not in {'0', 'false', 'no'}
+
+    # Core routes import ML/torch-heavy modules via services; keep them optional so
+    # Docker can run a slim post-analysis + dashboard stack.
+    if enable_core_routes:
+        from src.api.routes import api_bp
+        app.register_blueprint(api_bp, url_prefix=api_prefix)
+
+    if enable_async_routes:
+        from src.api.async_routes import async_bp
+        app.register_blueprint(async_bp, url_prefix=f'{api_prefix}/async')
+
+    app.register_blueprint(post_analysis_bp, url_prefix=api_prefix)
     app.register_blueprint(dashboard_bp, url_prefix='/dashboard')
     app.register_blueprint(health_bp, url_prefix=api_prefix)
     
     # Register Swagger/OpenAPI documentation
-    register_swagger_routes(app, api_prefix)
+    if enable_swagger:
+        register_swagger_routes(app, api_prefix)
     
     # Initialize databases
     try:
-        initialize_databases()
-        logger.info("Databases initialized successfully")
+        ok = initialize_databases()
+        if ok:
+            logger.info("Databases initialized successfully")
+        else:
+            logger.warning("Databases unavailable; running in degraded mode")
     except Exception as e:
         logger.warning(f"Database initialization failed: {e}. Some features may not work.")
     
     # Register cleanup on app shutdown
     atexit.register(cleanup_databases)
     
-    # Root endpoint - redirect to dashboard
+    # Root endpoint
     @app.route('/')
     def index():
-        from flask import redirect, url_for
-        return redirect(url_for('dashboard.index'))
+        # Keep this endpoint lightweight and DB-independent so tests and
+        # health checks work even when optional services (e.g., Postgres) are
+        # unavailable.
+        return jsonify({
+            'service': 'ai-sales-strategist-api',
+            'version': getattr(config, 'VERSION', '1.0.0'),
+            'status': 'running'
+        })
     
     # Database health check endpoint
     @app.route(f'{api_prefix}/db/health')

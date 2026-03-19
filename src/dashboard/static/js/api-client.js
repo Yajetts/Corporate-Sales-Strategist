@@ -188,11 +188,24 @@ class APIClient {
     /**
      * Get model explanation
      */
-    async getExplanation(modelType, prediction, features) {
+    async getExplanation(modelType, payload, options = {}) {
+        const explanationType = options.explanationType || 'local';
+
+        // /api/v1/explain expects:
+        // - local: { model_type, explanation_type: 'local', instance }
+        // - global: { model_type, explanation_type: 'global', background_data }
+        if (explanationType === 'global') {
+            return await this.post('/explain', {
+                model_type: modelType,
+                explanation_type: 'global',
+                background_data: payload
+            });
+        }
+
         return await this.post('/explain', {
             model_type: modelType,
-            prediction: prediction,
-            features: features
+            explanation_type: 'local',
+            instance: payload
         });
     }
 
@@ -295,7 +308,9 @@ function showSuccess(elementId, message) {
  */
 function formatNumber(num, decimals = 2) {
     if (num === null || num === undefined) return 'N/A';
-    return num.toLocaleString('en-US', {
+    const n = (typeof num === 'string') ? Number(num) : num;
+    if (!Number.isFinite(n)) return 'N/A';
+    return n.toLocaleString('en-US', {
         minimumFractionDigits: decimals,
         maximumFractionDigits: decimals
     });
@@ -306,7 +321,9 @@ function formatNumber(num, decimals = 2) {
  */
 function formatPercentage(value, decimals = 1) {
     if (value === null || value === undefined) return 'N/A';
-    return (value * 100).toFixed(decimals) + '%';
+    const v = (typeof value === 'string') ? Number(value) : value;
+    if (!Number.isFinite(v)) return 'N/A';
+    return (v * 100).toFixed(decimals) + '%';
 }
 
 /**

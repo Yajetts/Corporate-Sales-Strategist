@@ -91,14 +91,25 @@ function displayResults(data) {
     // Show results section
     document.getElementById('resultsSection').style.display = 'block';
     
-    // Use production_priorities or recommendations (backward compatibility)
-    const recommendations = data.production_priorities || data.recommendations || [];
-    
-    // Calculate metrics
-    const totalRevenue = recommendations.reduce((sum, p) => sum + (p.quantity * p.price), 0);
-    const totalCost = recommendations.reduce((sum, p) => sum + (p.quantity * p.cost), 0);
-    const netProfit = totalRevenue - totalCost;
-    const roi = totalCost > 0 ? (netProfit / totalCost) : 0;
+    // Normalize API response into the legacy shape expected by the dashboard code.
+    // The API returns items like {product_name, recommended_quantity, production_cost, ...}
+    // while the UI code historically expects {name, quantity, price, cost, demand, ...}.
+    const recommendations = normalizeOptimizationRecommendations(data);
+
+    // Prefer server-provided metrics (avoid NaN when UI fields differ)
+    const serverMetrics = data && data.optimization_metrics ? data.optimization_metrics : null;
+    const totalRevenue = Number.isFinite(serverMetrics?.total_revenue)
+        ? serverMetrics.total_revenue
+        : recommendations.reduce((sum, p) => sum + (p.quantity * p.price), 0);
+    const totalCost = Number.isFinite(serverMetrics?.total_cost)
+        ? serverMetrics.total_cost
+        : recommendations.reduce((sum, p) => sum + (p.quantity * p.cost), 0);
+    const netProfit = Number.isFinite(serverMetrics?.profit)
+        ? serverMetrics.profit
+        : (totalRevenue - totalCost);
+    const roi = Number.isFinite(serverMetrics?.roi)
+        ? serverMetrics.roi
+        : (totalCost > 0 ? (netProfit / totalCost) : 0);
     
     // Update summary metrics
     document.getElementById('totalRevenue').textContent = '$' + formatNumber(totalRevenue, 0);
@@ -118,12 +129,56 @@ function displayResults(data) {
 }
 
 /**
+ * Normalize various business optimization response shapes into the legacy
+ * "recommendations" format expected by the dashboard rendering functions.
+ */
+function normalizeOptimizationRecommendations(data) {
+    const raw = (data && (data.production_priorities || data.recommendations)) || [];
+    const allocationByProduct = data?.resource_allocation?.by_product || {};
+
+    return raw.map(item => {
+        const name = item.name || item.product_name || item.product || 'Unknown';
+
+        const quantity = asNumber(
+            item.quantity ?? item.recommended_quantity ?? item.recommendedQuantity,
+            0
+        );
+        const demand = asNumber(item.demand ?? item.demand_forecast ?? item.demandForecast, 0);
+
+        // Unit cost/price: try direct fields first, then derive from resource_allocation totals.
+        const alloc = allocationByProduct[name] || null;
+        const unitCost = asNumber(
+            item.cost ?? item.production_cost ?? item.productionCost,
+            alloc && quantity > 0 ? (asNumber(alloc.estimated_cost, 0) / quantity) : 0
+        );
+        const unitPrice = asNumber(
+            item.price,
+            alloc && quantity > 0 ? (asNumber(alloc.estimated_revenue, 0) / quantity) : 0
+        );
+
+        return {
+            name,
+            quantity,
+            demand,
+            cost: unitCost,
+            price: unitPrice,
+            priority_score: asNumber(item.priority_score ?? item.priorityScore, 0.5)
+        };
+    });
+}
+
+function asNumber(value, fallback = 0) {
+    const n = typeof value === 'string' ? parseFloat(value) : Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+/**
  * Render priority matrix with Plotly
  */
 function renderPriorityMatrix(recommendations) {
     // Create 2D matrix based on profit margin and demand
     const products = recommendations.map(r => r.name);
-    const profitMargins = recommendations.map(r => ((r.price - r.cost) / r.price));
+    const profitMargins = recommendations.map(r => (r.price > 0 ? ((r.price - r.cost) / r.price) : 0));
     const demands = recommendations.map(r => r.demand);
     
     const matrixData = [{
@@ -131,7 +186,10 @@ function renderPriorityMatrix(recommendations) {
         y: ['Profit Margin', 'Demand', 'Priority Score'],
         z: [
             profitMargins,
-            demands.map(d => d / Math.max(...demands)),
+            demands.map(d => {
+                const maxDemand = Math.max(...demands, 1);
+                return d / maxDemand;
+            }),
             recommendations.map(r => r.priority_score || 0.5)
         ],
         type: 'heatmap',
@@ -286,7 +344,9 @@ function renderProductionTable(recommendations) {
         
         const revenue = product.quantity * product.price;
         const cost = product.quantity * product.cost;
-        const profitMargin = ((product.price - product.cost) / product.price);
+        const profitMargin = (product.price > 0)
+            ? ((product.price - product.cost) / product.price)
+            : 0;
         const priority = getPriorityBadge(product.priority_score || 0.5);
         
         row.innerHTML = `
@@ -425,7 +485,8 @@ async function runWhatIfAnalysis() {
         const products = JSON.parse(productsDataStr);
         const adjustedProducts = products.map(p => ({
             ...p,
-            demand: p.demand * (1 + demandAdj)
+            demand: (asNumber(p.demand, asNumber(p.demand_forecast, 0))) * (1 + demandAdj),
+            demand_forecast: (asNumber(p.demand_forecast, asNumber(p.demand, 0))) * (1 + demandAdj)
         }));
         
         // Get objectives

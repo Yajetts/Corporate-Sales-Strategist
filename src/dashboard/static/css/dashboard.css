@@ -320,3 +320,20 @@ main {
     background-color: #ffc107;
     box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.2);
 }
+
+/* Floating Action Button (Analysis Overview) */
+.analysis-overview-fab {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 1050;
+    border-radius: 999px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+@media (max-width: 576px) {
+    .analysis-overview-fab {
+        right: 16px;
+        bottom: 16px;
+    }
+}

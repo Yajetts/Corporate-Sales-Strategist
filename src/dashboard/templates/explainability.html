@@ -26,9 +26,9 @@
                         <div class="col-md-6 mb-3">
                             <label for="modelType" class="form-label">Model Type</label>
                             <select class="form-select" id="modelType">
-                                <option value="strategy_rl">Strategy Engine (RL Agent)</option>
-                                <option value="performance_lstm">Performance Governor (LSTM)</option>
-                                <option value="business_regression">Business Manager (Regression)</option>
+                                <option value="rl">Strategy Engine (RL Agent)</option>
+                                <option value="lstm">Performance Governor (LSTM)</option>
+                                <option value="regression">Business Manager (Regression)</option>
                             </select>
                         </div>
                         
@@ -44,8 +44,10 @@
                     <div class="mb-3">
                         <label for="predictionData" class="form-label">Prediction Data (JSON)</label>
                         <textarea class="form-control" id="predictionData" rows="5" 
-                                  placeholder='{"feature1": 0.5, "feature2": 0.7, ...}'></textarea>
-                        <div class="form-text">Enter the prediction data as JSON</div>
+                                  placeholder='[0.5, 0.7, 0.2, 0.1, 0.0, 0.3, 0.9]'></textarea>
+                        <div class="form-text">
+                            Local: enter a JSON array (model input vector). Global: enter a JSON 2D array (background_data samples).
+                        </div>
                     </div>
                     
                     <button type="submit" class="btn btn-info btn-lg">

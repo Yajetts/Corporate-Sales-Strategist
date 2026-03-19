@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+
+{% block title %}Analysis Overview{% endblock %}
+
+{% block extra_head %}
+<style>
+  .report-markdown {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    line-height: 1.55;
+    color: #111;
+  }
+  .report-markdown h1 { font-size: 1.6rem; margin: 0 0 0.75rem 0; }
+  .report-markdown h2 { font-size: 1.2rem; margin: 1rem 0 0.5rem 0; }
+  .report-markdown p { margin: 0.35rem 0; }
+  .report-markdown ul, .report-markdown ol { margin: 0.25rem 0 0.5rem 1.25rem; }
+  .report-markdown code, .report-markdown pre {
+    font-family: inherit;
+    background: transparent;
+    padding: 0;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12">
+    <h2><i class="bi bi-file-earmark-text"></i> Analysis Overview</h2>
+    <p class="text-muted mb-3">Generates a unified report from the latest completed run’s module outputs. Podcast generation is available after the report is ready.</p>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Generate</span>
+      </div>
+      <div class="card-body">
+        <button class="btn btn-primary w-100" onclick="generateAnalysisOverview()">
+          <i class="bi bi-magic"></i> Generate Analysis Overview
+        </button>
+
+        <div class="mt-3" id="generationStatus" style="display:none;"></div>
+
+        {% if selected and selected.status and selected.status.get('full_analysis_run_complete') == false %}
+          <div class="alert alert-warning mt-3 mb-0">
+            Latest run is incomplete; missing modules will be marked as not executed.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Module Execution Status box removed per UX request. #}
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Report</span>
+        {% if selected %}
+          <div class="btn-group">
+            {% if selected.has_pdf %}
+              <a class="btn btn-outline-secondary btn-sm" href="{{ api_prefix }}/post_analysis/runs/{{ selected.run_id }}/artifact/report.pdf?download=1">
+                Download PDF
+              </a>
+            {% else %}
+              <button class="btn btn-outline-secondary btn-sm" disabled title="Generate Analysis Overview to produce the PDF">
+                Download PDF
+              </button>
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="card-body" style="max-height: 70vh; overflow:auto;">
+        {% if not selected %}
+          <div class="text-muted">No Analysis Overview run found yet. Generate one to view the latest report.</div>
+        {% else %}
+          {% if selected.status %}
+            <div class="mb-3">
+              <span class="badge bg-info">{{ selected.status.state }}</span>
+              <span class="text-muted ms-2">{{ selected.status.updated_at }}</span>
+            </div>
+          {% endif %}
+
+          {% if report_html %}
+            <div class="report-markdown">{{ report_html | safe }}</div>
+          {% else %}
+            <div class="text-muted">Report not ready yet. This page will update when generated.</div>
+          {% endif %}
+
+          <hr />
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Podcast Summary</h5>
+            {% if selected and selected.has_report and not selected.has_audio %}
+              <button class="btn btn-outline-primary btn-sm" onclick="generatePodcastSummary('{{ selected.run_id }}')">
+                Generate Podcast Summary
+              </button>
+            {% endif %}
+          </div>
+
+          <div class="mt-2" id="podcastStatus" style="display:none;"></div>
+
+          {% if selected.has_audio %}
+            <audio controls style="width: 100%;" class="mt-2">
+              <source src="{{ api_prefix }}/post_analysis/runs/{{ selected.run_id }}/artifact/audio.mp3" type="audio/mpeg" />
+            </audio>
+            <div class="mt-2">
+              <a class="btn btn-outline-secondary btn-sm" href="{{ api_prefix }}/post_analysis/runs/{{ selected.run_id }}/artifact/audio.mp3?download=1">Download MP3</a>
+            </div>
+          {% endif %}
+
+          {% if debug and selected.status %}
+            <hr />
+            <details class="mt-2">
+              <summary class="text-muted">Debug: module contribution map (JSON)</summary>
+              <pre class="small mt-2" style="white-space: pre-wrap;">{{ (selected.status.get('module_contributions', {}) if selected.status else {}) | tojson(indent=2) }}</pre>
+            </details>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  async function generateAnalysisOverview() {
+    const statusEl = document.getElementById('generationStatus');
+    statusEl.style.display = 'block';
+    statusEl.className = 'alert alert-info';
+    statusEl.textContent = 'Queued…';
+
+    try {
+      const resp = await apiClient.post('/post_analysis/generate', {});
+
+      statusEl.className = 'alert alert-success';
+      statusEl.innerHTML = `Started. Run: <code>${resp.run_id}</code> (task: <code>${resp.celery_task_id}</code>)<br/>Polling status…`;
+
+      const statusUrl = `${resp.status_url}`;
+      for (let i = 0; i < 120; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const s = await apiClient.get(statusUrl.replace('/api/v1',''));
+        statusEl.className = 'alert alert-info';
+        statusEl.textContent = `State: ${s.state}`;
+        if (s.state === 'ready') {
+          window.location.href = `{{ url_for('dashboard.analysis_overview') }}`;
+          return;
+        }
+      }
+
+      statusEl.className = 'alert alert-warning';
+      statusEl.textContent = 'Still running; refresh later.';
+
+    } catch (e) {
+      statusEl.className = 'alert alert-danger';
+      statusEl.textContent = e.message || 'Failed to start generation';
+    }
+  }
+
+  async function generatePodcastSummary(runId) {
+    const statusEl = document.getElementById('podcastStatus');
+    statusEl.style.display = 'block';
+    statusEl.className = 'alert alert-info';
+    statusEl.textContent = 'Queued…';
+
+    try {
+      const resp = await apiClient.post(`/post_analysis/runs/${runId}/podcast`, {});
+      statusEl.className = 'alert alert-success';
+      statusEl.innerHTML = `Podcast generation started (task: <code>${resp.celery_task_id}</code>). Polling…`;
+
+      const statusUrl = `${resp.status_url}`;
+      for (let i = 0; i < 120; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const s = await apiClient.get(statusUrl.replace('/api/v1',''));
+        statusEl.className = 'alert alert-info';
+        statusEl.textContent = `State: ${s.state}`;
+        if (s.audio_mp3) {
+          window.location.href = `{{ url_for('dashboard.analysis_overview') }}`;
+          return;
+        }
+      }
+
+      statusEl.className = 'alert alert-warning';
+      statusEl.textContent = 'Still generating; refresh later.';
+
+    } catch (e) {
+      statusEl.className = 'alert alert-danger';
+      statusEl.textContent = e.message || 'Failed to start podcast generation';
+    }
+  }
+</script>
+{% endblock %}

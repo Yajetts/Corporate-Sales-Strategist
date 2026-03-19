@@ -1,7 +1,8 @@
 """API routes for the Sales Strategist System"""
 
 import logging
-from flask import Blueprint, request, jsonify
+import os
+from flask import Blueprint, request, jsonify, current_app
 from marshmallow import ValidationError
 from src.api.schemas import (
     AnalyzeCompanyRequestSchema,
@@ -22,8 +23,47 @@ from src.services.business_manager_service import BusinessManagerService
 import pandas as pd
 import numpy as np
 import time
+import uuid
+
+from src.post_analysis.storage.module_output_store import ModuleOutputStore
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_task_id(prefix: str) -> str:
+    return f"sync_{prefix}_{uuid.uuid4().hex}"
+
+
+def _cache_latest_output(module: str, result: object) -> None:
+    """Best-effort local cache for Analysis Overview collection.
+
+    Some services return non-dict objects (e.g., dataclasses / pydantic-like models).
+    We only cache JSON-serializable dict payloads.
+    """
+    try:
+        if isinstance(result, dict):
+            payload = dict(result)
+        else:
+            # Fall back to instance attributes if available.
+            payload = dict(getattr(result, "__dict__", {}) or {})
+        if not isinstance(payload, dict):
+            return
+
+        store = ModuleOutputStore()
+        task_id = payload.get("task_id") or _sync_task_id(module)
+        payload["task_id"] = task_id
+
+        boot_id = None
+        try:
+            boot_id = current_app.config.get("BOOT_ID")
+        except Exception:
+            boot_id = None
+        if boot_id:
+            payload["_boot_id"] = str(boot_id)
+
+        store.write_latest(module, task_id=task_id, payload=payload)
+    except Exception as e:
+        logger.debug(f"Failed to cache latest output for {module}: {e}")
 
 # Create blueprint
 api_bp = Blueprint('api', __name__)
@@ -132,9 +172,12 @@ def analyze_company():
         # Get service and analyze
         service = EnterpriseAnalystService()
         result = service.analyze_company(text, source_type)
-        
+
         # Validate response
         validated_response = analyze_company_response_schema.dump(result)
+
+        # Cache for post-analysis (works even when DB is down)
+        _cache_latest_output("enterprise", validated_response)
         
         return jsonify(validated_response), 200
         
@@ -353,9 +396,11 @@ def market_analysis():
                 similarity_threshold=similarity_threshold,
                 top_k_links=top_k_links
             )
-            
+
             # Validate response
             validated_response = market_analysis_response_schema.dump(result)
+
+            _cache_latest_output("market", validated_response)
             
             return jsonify(validated_response), 200
             
@@ -587,9 +632,11 @@ def generate_strategy():
                 include_explanation=include_explanation,
                 deterministic=deterministic
             )
-            
+
             # Validate response
             validated_response = strategy_response_schema.dump(result)
+
+            _cache_latest_output("strategy", validated_response)
             
             return jsonify(validated_response), 200
             
@@ -928,6 +975,8 @@ def monitor_performance():
                 strategy_context=strategy_context,
                 include_feedback=include_feedback
             )
+
+            _cache_latest_output("performance", result)
             
             return jsonify(result), 200
             
@@ -1260,7 +1309,14 @@ def optimize_business():
         logger.info(f"Processing business_optimizer request (products: {len(product_portfolio)})")
         
         # Initialize service
-        service = BusinessManagerService()
+        # Prefer the bundled checkpoint (works out-of-the-box for dashboard demos)
+        default_model_path = os.getenv(
+            'BUSINESS_OPTIMIZER_MODEL_PATH',
+            'models/checkpoints/business_optimizer/final_model.pt'
+        )
+        service = BusinessManagerService(
+            model_path=default_model_path if os.path.exists(default_model_path) else None
+        )
         
         # Optimize business (will use fallback if model not loaded)
         try:
@@ -1272,9 +1328,11 @@ def optimize_business():
                 revenue_weight=revenue_weight,
                 cost_weight=cost_weight
             )
-            
+
             # Validate response
             validated_response = business_optimizer_response_schema.dump(result)
+
+            _cache_latest_output("optimization", validated_response)
             
             return jsonify(validated_response), 200
             
@@ -1400,8 +1458,14 @@ def analyze_business_scenarios():
         
         logger.info(f"Processing business scenario analysis (scenarios: {len(scenarios)})")
         
-        # Initialize service
-        service = BusinessManagerService()
+        # Initialize service (prefer bundled checkpoint)
+        default_model_path = os.getenv(
+            'BUSINESS_OPTIMIZER_MODEL_PATH',
+            'models/checkpoints/business_optimizer/final_model.pt'
+        )
+        service = BusinessManagerService(
+            model_path=default_model_path if os.path.exists(default_model_path) else None
+        )
         
         # Check if model is loaded
         if not service.model_loaded:
@@ -1590,7 +1654,10 @@ def explain_model():
             elif model_type == 'regression':
                 from src.models.business_optimizer import BusinessOptimizer
                 regression_optimizer = BusinessOptimizer()
-                regression_optimizer.load_checkpoint('models/checkpoints/business_optimizer/best_model.pt')
+                ckpt = 'models/checkpoints/business_optimizer/final_model.pt'
+                if not os.path.exists(ckpt):
+                    ckpt = 'models/checkpoints/business_optimizer/best_model.pt'
+                regression_optimizer.load_checkpoint(ckpt)
         
         except FileNotFoundError as e:
             return jsonify({
@@ -1599,12 +1666,14 @@ def explain_model():
                 'status_code': 503
             }), 503
         except Exception as e:
-            logger.error(f"Error loading model: {e}")
+            # Many model-loading failures are not FileNotFoundError (e.g. corrupt checkpoint, missing deps).
+            # Treat these as "not ready" for the dashboard, with a helpful message.
+            logger.error(f"Error loading model: {e}", exc_info=True)
             return jsonify({
-                'error': 'Service Error',
-                'message': f'Failed to load model: {str(e)}',
-                'status_code': 500
-            }), 500
+                'error': 'Service Not Ready',
+                'message': f'Explainability model is not ready: {str(e)}',
+                'status_code': 503
+            }), 503
         
         # Create transparency service
         transparency_service = ModelTransparencyService(
@@ -1638,7 +1707,10 @@ def explain_model():
                     top_n=top_n
                 )
                 result['explanation_type'] = 'global'
-            
+
+            # Cache for post-analysis collection (works even when DB is down)
+            _cache_latest_output("shap", result)
+
             return jsonify(result), 200
             
         except TimeoutError:
@@ -1668,9 +1740,122 @@ def explain_model():
         logger.error(f"Unexpected error in explain_model: {e}", exc_info=True)
         return jsonify({
             'error': 'Internal Server Error',
-            'message': 'An unexpected error occurred',
+            'message': f'An unexpected error occurred: {str(e)}',
             'status_code': 500
         }), 500
+
+
+@api_bp.route('/explain/schema', methods=['GET'])
+def explain_schema():
+    """Return expected input shapes and example payloads for /explain.
+
+    This is used by the dashboard Explainability page to populate a valid
+    sample instance/background dataset.
+
+    Response:
+        {
+          "rl": {"status": "ready|not_ready", "instance_shape": [n], "instance_example": [...], "background_data_example": [[...], ...]},
+          "lstm": {"status": "ready|not_ready", "instance_shape": [seq_len, input_size], ...},
+          "regression": {"status": "ready|not_ready", "instance_shape": [n], ...}
+        }
+    """
+    def _make_background(instance: list[float], *, n: int = 10, jitter: float = 0.05) -> list[list[float]]:
+        arr = np.array(instance, dtype=np.float32)
+        out = []
+        for _ in range(n):
+            noise = np.random.normal(0, jitter, size=arr.shape).astype(np.float32)
+            out.append((arr + noise).tolist())
+        return out
+
+    schema: dict = {}
+
+    # RL
+    try:
+        from src.models.strategy_agent import StrategyAgent
+        rl_agent = StrategyAgent(model_path='models/checkpoints/strategy_agent/best_model.zip')
+        # Prefer env-derived dimension when available.
+        obs_dim = int(rl_agent.env.observation_space.shape[0])
+        # Reasonable demo values (mostly 0-1, with a small trend signal)
+        base = [0.6, 0.55, 0.5, 0.65, 0.12, 0.4, -0.05]
+        if obs_dim != len(base):
+            base = (base + [0.0] * obs_dim)[:obs_dim]
+        schema['rl'] = {
+            'status': 'ready',
+            'instance_shape': [obs_dim],
+            'instance_example': base,
+            'background_data_example': _make_background(base, n=12)
+        }
+    except Exception as e:
+        # Fall back to a common default shape so the UI can still populate something.
+        # StrategyAgent default observation layout: 1 + num_competitors + 4.
+        num_comp = 5
+        obs_dim = 1 + num_comp + 4
+        base = [0.6, 0.55, 0.5, 0.65, 0.12, 0.4, -0.05]
+        base = (base + [0.0] * obs_dim)[:obs_dim]
+        schema['rl'] = {
+            'status': 'not_ready',
+            'message': str(e),
+            'instance_shape': [obs_dim],
+            'instance_example': base,
+            'background_data_example': _make_background(base, n=12)
+        }
+
+    # LSTM
+    try:
+        from src.models.sales_forecaster import SalesForecaster
+        lstm = SalesForecaster()
+        lstm.load_checkpoint('models/checkpoints/sales_forecaster/best_model.pt')
+        seq_len = int(getattr(lstm, 'sequence_length', 30))
+        input_size = int(getattr(lstm, 'input_size', 3))
+        # Instance can be provided as a 2D sequence; SHAPExplainer will flatten it.
+        instance = (np.random.rand(seq_len, input_size).astype(np.float32) * 0.5).tolist()
+        background = (np.random.rand(10, seq_len, input_size).astype(np.float32) * 0.5).tolist()
+        schema['lstm'] = {
+            'status': 'ready',
+            'instance_shape': [seq_len, input_size],
+            'instance_example': instance,
+            'background_data_example': background
+        }
+    except Exception as e:
+        seq_len, input_size = 30, 3
+        instance = (np.random.rand(seq_len, input_size).astype(np.float32) * 0.5).tolist()
+        background = (np.random.rand(10, seq_len, input_size).astype(np.float32) * 0.5).tolist()
+        schema['lstm'] = {
+            'status': 'not_ready',
+            'message': str(e),
+            'instance_shape': [seq_len, input_size],
+            'instance_example': instance,
+            'background_data_example': background
+        }
+
+    # Regression
+    try:
+        from src.models.business_optimizer import BusinessOptimizer
+        reg = BusinessOptimizer()
+        ckpt = 'models/checkpoints/business_optimizer/final_model.pt'
+        if not os.path.exists(ckpt):
+            ckpt = 'models/checkpoints/business_optimizer/best_model.pt'
+        reg.load_checkpoint(ckpt)
+        n = int(getattr(reg, 'input_size', 8))
+        base = (np.random.rand(n).astype(np.float32) * 0.5).tolist()
+        schema['regression'] = {
+            'status': 'ready',
+            'instance_shape': [n],
+            'instance_example': base,
+            'background_data_example': _make_background(base, n=12)
+        }
+    except Exception as e:
+        n = 8
+        base = (np.random.rand(n).astype(np.float32) * 0.5).tolist()
+        schema['regression'] = {
+            'status': 'not_ready',
+            'message': str(e),
+            'instance_shape': [n],
+            'instance_example': base,
+            'background_data_example': _make_background(base, n=12)
+        }
+
+    return jsonify(schema), 200
 
 
 @api_bp.route('/explain/batch', methods=['POST'])
@@ -1788,7 +1973,10 @@ def explain_batch():
             elif model_type == 'regression':
                 from src.models.business_optimizer import BusinessOptimizer
                 regression_optimizer = BusinessOptimizer()
-                regression_optimizer.load_checkpoint('models/checkpoints/business_optimizer/best_model.pt')
+                ckpt = 'models/checkpoints/business_optimizer/final_model.pt'
+                if not os.path.exists(ckpt):
+                    ckpt = 'models/checkpoints/business_optimizer/best_model.pt'
+                regression_optimizer.load_checkpoint(ckpt)
         
         except FileNotFoundError as e:
             return jsonify({
@@ -1822,6 +2010,9 @@ def explain_batch():
             'num_instances': len(instances),
             'processing_time_seconds': processing_time
         }
+
+        # Cache for post-analysis collection
+        _cache_latest_output("shap", result)
         
         return jsonify(result), 200
         

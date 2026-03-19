@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Enterprise Analyst{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12">
+    <h2><i class="bi bi-building"></i> Enterprise Analyst</h2>
+    <p class="text-muted mb-3">Analyze company or product text to extract category, domain, and key features. This output is used by Analysis Overview.</p>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header">Input</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label for="sourceType" class="form-label">Source type (optional)</label>
+          <select id="sourceType" class="form-select">
+            <option value="">(none)</option>
+            <option value="annual_report">annual_report</option>
+            <option value="product_summary">product_summary</option>
+            <option value="whitepaper">whitepaper</option>
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label for="companyText" class="form-label">Company / product text</label>
+          <textarea id="companyText" class="form-control" rows="10" placeholder="Paste a company description, product summary, or excerpt..."></textarea>
+        </div>
+
+        <div class="d-grid gap-2">
+          <button class="btn btn-dark" onclick="runEnterpriseAnalysis()">
+            <i class="bi bi-play-fill"></i> Run Enterprise Analysis
+          </button>
+          <button class="btn btn-outline-secondary" type="button" onclick="loadSampleText()">
+            <i class="bi bi-file-earmark-text"></i> Load Sample Text
+          </button>
+        </div>
+
+        <div class="mt-3" id="enterpriseStatus" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header">Result</div>
+      <div class="card-body">
+        <div id="enterpriseResult" class="text-muted">Run the analysis to see results.</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function loadSampleText() {
+    const sample = [
+      "AcmeCloud is a B2B SaaS platform that helps mid-market manufacturers manage procurement, inventory, and supplier performance.",
+      "The product provides real-time dashboards, automated purchase order workflows, and predictive demand planning.",
+      "Key differentiators include fast ERP integrations, configurable approval rules, and anomaly detection for supply disruptions.",
+      "Target customers are operations and supply-chain teams seeking to reduce stockouts, lower carrying costs, and improve on-time delivery.",
+    ].join("\n\n");
+
+    document.getElementById('sourceType').value = 'product_summary';
+    document.getElementById('companyText').value = sample;
+
+    const statusEl = document.getElementById('enterpriseStatus');
+    statusEl.style.display = 'block';
+    statusEl.className = 'alert alert-info';
+    statusEl.textContent = 'Loaded sample text. Click “Run Enterprise Analysis”.';
+  }
+
+  function escapeHtml(str) {
+    return (str || '').replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  async function runEnterpriseAnalysis() {
+    const statusEl = document.getElementById('enterpriseStatus');
+    const resultEl = document.getElementById('enterpriseResult');
+
+    const text = document.getElementById('companyText').value || '';
+    const sourceType = document.getElementById('sourceType').value || null;
+
+    statusEl.style.display = 'block';
+    statusEl.className = 'alert alert-info';
+    statusEl.textContent = 'Running…';
+
+    try {
+      const resp = await apiClient.analyzeCompany(text, sourceType);
+
+      statusEl.className = 'alert alert-success';
+      statusEl.textContent = 'Completed. This output is now available for Analysis Overview.';
+
+      const html = `
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">Product category</div>
+                <div class="fw-semibold">${escapeHtml(resp.product_category)}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">Business domain</div>
+                <div class="fw-semibold">${escapeHtml(resp.business_domain)}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">Value proposition</div>
+                <div class="fw-semibold">${escapeHtml(resp.value_proposition)}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">Raw response</div>
+                <pre class="small" style="white-space: pre-wrap;">${escapeHtml(JSON.stringify(resp, null, 2))}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      resultEl.className = '';
+      resultEl.innerHTML = html;
+
+    } catch (e) {
+      statusEl.className = 'alert alert-danger';
+      statusEl.textContent = e.message || 'Failed to run enterprise analysis';
+      resultEl.className = 'text-muted';
+      resultEl.textContent = 'No result.';
+    }
+  }
+</script>
+{% endblock %}

@@ -1,161 +1,268 @@
 # Corporate Sales Strategist
 
-AI-driven, modular decision-support engine for enterprise sales teams. It analyzes, reasons, strategizes, and adapts to accelerate accurate sales decision-making.
+AI-driven, modular decision-support system for enterprise sales teams. The platform combines NLP, representation learning, forecasting, optimization, and explainability into one workflow and a unified dashboard.
 
-## Overview
+## What This Project Solves
 
-Businesses today operate in markets that shift faster than traditional sales teams can respond. Frequent stock declines across sectors—retail, tech, FMCG, automotive, and finance—often trace back to recurring issues:
+Sales organizations often face avoidable losses due to:
 
-- Poor customer–market alignment
-- Inefficient sales strategies
-- Inaccurate demand forecasts
-- Slow decision cycles
+- Weak product-market alignment
+- Slow reaction to demand changes
+- Inconsistent pricing and campaign strategy
+- Poor visibility into forecast risk
+- Low explainability of model-driven recommendations
 
-Corporate Sales Strategist addresses these challenges using modern neural architectures across specialized modules forming an end-to-end system for enterprise sales analysis and optimization.
+Corporate Sales Strategist addresses these gaps by coordinating six domain modules and a post-analysis layer that produces executive-ready outputs.
 
-## Features at a Glance
+## Core Modules
 
-- Automated analysis of company reports, products, and sales materials
-- Market segmentation using deep unsupervised representation learning
-- AI-driven, reinforcement-learning-optimized sales strategy generation
-- Forecasting and performance monitoring through sequential neural models
-- Resource planning with classical regression for explainable decisioning
-- Full transparency using SHAP-based explainability
+### 1. Enterprise Analyst
 
-## System Architecture
+Purpose: company and product understanding from unstructured business text.
 
-The platform is composed of six specialized neural modules, each covering a critical component of the sales intelligence workflow.
+- Extracts semantic business signals
+- Produces structured context for downstream modules
+- Supports company/product text flows in dashboard and API
 
-### 1. Enterprise Analyst (BERT Encoder)
-**Focus:** Company & Product Understanding
+### 2. Market Decipherer
 
-Uses a BERT-based transformer to read and analyze:
+Purpose: customer and market segmentation using representation learning and clustering.
 
-- Company descriptions
-- Product catalogs
-- Sales reports
-- Customer feedback
-- Competitor documentation
+- Learns latent patterns from high-dimensional market data
+- Produces segment profiles and cluster-level insights
+- Feeds strategy and post-analysis sections
 
-It extracts semantic features and transforms raw business text into structured embeddings—providing context for downstream modules like market segmentation and strategy generation.
+### 3. Strategy Engine
 
-Key capabilities:
+Purpose: strategy recommendation and pricing/action guidance.
 
-- Entity extraction
-- Text summarization
-- Feature embedding generation
-- Sentiment & intent scoring
-- Product–market positioning insights
+- Generates sales actions from market state
+- Includes fallback heuristics when model checkpoints are unavailable
+- Returns actionable insights suitable for dashboard use
 
-### 2. Market Decipherer (Variational Autoencoder + Graph Neural Network)
-**Focus:** High-Precision Market Segmentation
+### 4. Performance Governor
 
-Identifies patterns in large, noisy market datasets via two core components:
+Purpose: forecast and risk monitoring.
 
-**A. Variational Autoencoder (VAE)**
+- Monitors trends and expected trajectory
+- Surfaces alerts and risk signals
+- Supports readiness and operational decisioning
 
-- Compresses high-dimensional market data (hundreds of features)
-- Removes noise and redundancy
-- Learns meaningful latent factors (e.g., customer intent, price sensitivity)
+### 5. Business Manager
 
-**B. Graph Neural Network (GNN)**
+Purpose: resource and production optimization.
 
-- Represents customer segments as nodes
-- Models similarity relationships
-- Clusters latent representations to surface hidden profiles
+- Optimizes portfolio-level allocations
+- Normalizes legacy payload variants
+- Returns optimization metrics and recommendations used by dashboard and post-analysis
 
-Clustering reveals segments such as:
+### 6. Model Transparency (SHAP)
 
-- Budget-sensitive buyers
-- Feature-driven buyers
-- High-value enterprise clients
-- Churn-risk customers
+Purpose: explainability and confidence context.
 
-These segments can then be precisely targeted.
+- Supports local/global explanation workflows
+- Provides feature contribution signals
+- Integrated into Analysis Overview confidence section
 
-### 3. Strategy Engine (Reinforcement Learning + LLM Planner)
-**Focus:** Adaptive Sales Strategy Optimization
 
-Learns optimal sales actions through iterative simulation and reward feedback.
+## Analysis Overview (Post-Analysis)
 
-Process:
+A newly added Post-Analysis capability now aggregates module outputs into a single executive report and optional audio summary.
 
-- RL agent simulates sales scenarios
-- Rewards granted for improved revenue, engagement, or conversions
-- Policy refined over time into optimal playbooks
-- LLM translates learned policies into human-readable strategies
+### What it does
 
-Outputs:
+- Collects latest outputs from:
+  - Enterprise Analyst
+  - Market Decipherer
+  - Strategy Engine
+  - Performance Governor
+  - Business Manager
+  - Model Transparency (SHAP)
+- Builds a unified Analysis Overview report in Markdown and text
+- Exports PDF when PDF dependencies are available
+- Optionally generates a podcast-style MP3 summary
+- Stores artifacts under `logs/post_analysis/<run_id>/`
 
-- Suggested pitch plans
-- Customer-specific strategy maps
-- Sales workflow recommendations
-- Price-adjustment strategies
-- Follow-up timing optimization
+### Dashboard experience
 
-Continuously improves as more data is ingested.
+- Analysis Overview page: `http://127.0.0.1:5000/dashboard/analysis-overview`
+- Floating action button appears when all required module outputs are available in the current app session
+- If a module did not run, the report clearly marks it as not executed in this run
 
-### 4. Performance Governor (LSTM Forecasting Model)
-**Focus:** Sales Performance Prediction & Monitoring
+### API endpoints
 
-Uses LSTM networks to track and forecast:
+- Trigger report generation: `POST /api/v1/post_analysis/generate`
+- Run status: `GET /api/v1/post_analysis/runs/<run_id>/status`
+- Trigger podcast summary: `POST /api/v1/post_analysis/runs/<run_id>/podcast`
+- Download artifacts:
+  - `GET /api/v1/post_analysis/runs/<run_id>/artifact/report.md?download=1`
+  - `GET /api/v1/post_analysis/runs/<run_id>/artifact/report.pdf?download=1`
+  - `GET /api/v1/post_analysis/runs/<run_id>/artifact/podcast_script.txt?download=1`
+  - `GET /api/v1/post_analysis/runs/<run_id>/artifact/audio.mp3?download=1`
 
-- Monthly sales
-- Revenue curves
-- Conversion rates
-- Lead engagement
-- Customer churn patterns
+## Architecture Overview
 
-Enables:
+The system is organized into:
 
-- Early warning signal detection
-- Decline forecasting
-- Seasonal pattern prediction
-- Anomaly alerting
+- API layer: Flask routes and health/readiness endpoints
+- Dashboard layer: Jinja templates + static JS/CSS
+- Async layer: Celery task processing with Redis
+- Data layer: PostgreSQL + MongoDB + Redis
+- Post-analysis layer: snapshot collection, report generation, artifact storage, audio generation
 
-Acts as an early radar for emerging performance shifts.
+## Repository Layout
 
-### 5. Business Manager (Regression Engine)
-**Focus:** Operational & Resource Optimization
+Key areas:
 
-Answers practical planning questions:
+- `src/api/`: API app, routes, async routes, health, database integration
+- `src/dashboard/`: dashboard pages, frontend assets, templates
+- `src/services/`: business logic per module
+- `src/post_analysis/`: analysis overview orchestration, reporting, storage, audio
+- `tests/`: unit and integration tests
+- `scripts/`: local run and utility scripts
+- `deployment/`, `k8s/`: deployment assets
 
-- Budget allocation per segment
-- Agent distribution across lead groups
-- Discount ranges balancing revenue and margins
-- Channel investment prioritization
+## Quick Start
 
-Classical regression chosen for being:
+### Prerequisites
 
-- Fast
-- Transparent
-- Boardroom-explainable
+- Python 3.10+
+- Docker Desktop (recommended for local infra)
+- Optional for audio summary: Coqui TTS and MP3 encoder dependencies
 
-Outputs clear numbers for resource allocation, cost distribution, and ROI estimations.
+### 1) Clone and install
 
-### 6. Model Transparency Layer (SHAP Explainability)
-**Focus:** Decision Rationale & Auditability
+```bash
+git clone <your-repo-url>
+cd NNUFinalProject
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-Provides explanations after each prediction or recommendation:
+### 2) Configure environment
 
-- Feature contribution breakdowns
-- Rationale for segment selection
-- Justification of strategy recommendations
-- Signals triggering performance alerts
+Create an `.env` file (you can start from `.env.example`) and set:
 
-Enhances trust and auditability in enterprise environments.
+- DB connection variables
+- Redis variables
+- Optional LLM keys for report/script generation
+- Optional post-analysis tuning flags
+
+### 3) Choose a run mode
+
+### Mode A: Local API with Docker infra (recommended)
+
+```powershell
+./scripts/run_local_with_docker_infra.ps1 -BindAddress 0.0.0.0 -Port 5000
+```
+
+This brings up required containers and runs Flask locally.
+
+### Mode B: No-DB local mode (fast dev/testing)
+
+```powershell
+python -m src.api.run_nodb --host 0.0.0.0 --port 5000
+```
+
+Notes:
+
+- Disables DB initialization
+- Uses sync post-analysis behavior by default
+- Opens dashboard automatically unless `--no-open-browser` is used
+
+### Mode C: Docker Compose full stack
+
+```bash
+docker compose up -d --build
+```
+
+Optional MLflow profile:
+
+```bash
+docker compose --profile mlflow up -d
+```
+
+## Access URLs
+
+- API root: `http://127.0.0.1:5000/`
+- Dashboard home: `http://127.0.0.1:5000/dashboard/`
+- Enterprise page: `http://127.0.0.1:5000/dashboard/enterprise`
+- Analysis Overview page: `http://127.0.0.1:5000/dashboard/analysis-overview`
+- Swagger (if enabled): `http://127.0.0.1:5000/api/v1/docs`
+
+## Environment Flags (Important)
+
+Common runtime toggles used by this project:
+
+- `API_ENABLE_CORE_ROUTES`: enable/disable core ML-heavy routes
+- `API_ENABLE_ASYNC_ROUTES`: enable/disable async route set
+- `API_ENABLE_SWAGGER`: enable/disable docs endpoints
+- `CELERY_INCLUDE_CORE_TASKS`: include/exclude heavy core Celery task modules
+- `DB_INIT_DISABLE`: skip DB initialization entirely
+- `DB_INIT_STRICT`: fail hard on DB init errors when set
+- `POST_ANALYSIS_USE_CELERY`: force async/sync post-analysis execution mode
+
+## Post-Analysis Artifacts
+
+Generated artifacts are written to:
+
+- `logs/post_analysis/<run_id>/snapshot.json`
+- `logs/post_analysis/<run_id>/report.md`
+- `logs/post_analysis/<run_id>/report.txt`
+- `logs/post_analysis/<run_id>/report.pdf` (best effort)
+- `logs/post_analysis/<run_id>/podcast_script.txt` (when podcast generated)
+- `logs/post_analysis/<run_id>/audio.mp3` (when podcast generated)
+- `logs/post_analysis/<run_id>/status.json`
+
+The latest run pointer is stored in:
+
+- `logs/post_analysis/latest.json`
+
+## Testing
+
+Run the full test suite:
+
+```bash
+pytest -q
+```
+
+Run only post-analysis tests:
+
+```bash
+pytest -q tests/test_post_analysis_*.py
+```
+
+## Deployment
+
+Deployment assets are available for:
+
+- Docker-based environments (`Dockerfile*`, `docker-compose.yml`)
+- Kubernetes (`k8s/` manifests)
+- Terraform-assisted AWS deployment (`deployment/terraform-aws.tf`)
+
+See deployment notes in:
+
+- `deployment/README.md`
+
+## Documentation
+
+- User guide: `docs/USER_GUIDE.md`
 
 ## Tech Stack
 
-**Languages & Frameworks:**
+- Python, Flask, Celery
+- PostgreSQL, MongoDB, Redis
+- PyTorch, NumPy, Pandas, scikit-learn
+- SHAP-based explainability patterns
+- Markdown + PDF artifact generation for reporting
 
-- Python
-- PyTorch
-- Scikit-Learn
-- NumPy & Pandas
-- NetworkX / PyTorch Geometric
-- Matplotlib / Seaborn (for analysis)
+## Notes
 
----
+- Some advanced model paths/checkpoints are optional in development.
+- Dashboard and post-analysis components are designed to degrade gracefully when optional infra is unavailable.
+- For minimal Docker images, use the provided split requirement files (`requirements.docker.txt`, `requirements.worker.txt`).
 
-> This README has been converted to structured Markdown for clarity and easier navigation.
+## License
+
+See `LICENSE`.

@@ -1,15 +1,11 @@
 """Health check endpoints and utilities for the Sales Strategist API"""
 
 import logging
+import os
 import time
 from typing import Dict, Any
 from flask import Blueprint, jsonify
 from src.api.database import postgres_manager, mongodb_manager
-from src.services.enterprise_analyst_service import EnterpriseAnalystService
-from src.services.market_decipherer_service import MarketDeciphererService
-from src.services.strategy_engine_service import StrategyEngineService
-from src.services.performance_governor_service import PerformanceGovernorService
-from src.services.business_manager_service import BusinessManagerService
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +53,23 @@ def check_model_readiness() -> Dict[str, Any]:
     Returns:
         Dictionary with model readiness status
     """
+    enable_core_routes = os.getenv('API_ENABLE_CORE_ROUTES', '1').strip().lower() not in {'0', 'false', 'no'}
+    if not enable_core_routes:
+        return {
+            'models': {},
+            'overall': 'skipped',
+            'ready_count': 0,
+            'total_count': 0,
+            'message': 'Core ML routes disabled; model readiness checks skipped'
+        }
+
+    # Import model services only when enabled; these pull in heavier deps (e.g., torch).
+    from src.services.enterprise_analyst_service import EnterpriseAnalystService
+    from src.services.market_decipherer_service import MarketDeciphererService
+    from src.services.strategy_engine_service import StrategyEngineService
+    from src.services.performance_governor_service import PerformanceGovernorService
+    from src.services.business_manager_service import BusinessManagerService
+
     models_status = {}
     
     # Check Enterprise Analyst (BERT)
@@ -190,15 +203,22 @@ def readiness_check():
     try:
         # Check database connections
         db_health = check_database_health()
-        
-        # Check model readiness
-        model_health = check_model_readiness()
-        
-        # Service is ready if databases are healthy and at least some models are loaded
-        is_ready = (
-            db_health['overall'] == 'healthy' and
-            model_health['ready_count'] >= 2  # At least 2 models should be ready
-        )
+
+        enable_core_routes = os.getenv('API_ENABLE_CORE_ROUTES', '1').strip().lower() not in {'0', 'false', 'no'}
+
+        model_health = None
+        if enable_core_routes:
+            # Check model readiness
+            model_health = check_model_readiness()
+
+            # Service is ready if databases are healthy and at least some models are loaded
+            is_ready = (
+                db_health['overall'] == 'healthy' and
+                model_health['ready_count'] >= 2  # At least 2 models should be ready
+            )
+        else:
+            # Slim (post-analysis only) mode: require DBs only.
+            is_ready = (db_health['overall'] == 'healthy')
         
         status_code = 200 if is_ready else 503
         
@@ -206,11 +226,15 @@ def readiness_check():
             'status': 'ready' if is_ready else 'not_ready',
             'message': 'Service is ready to accept traffic' if is_ready else 'Service is not ready',
             'databases': db_health,
-            'models': {
-                'ready_count': model_health['ready_count'],
-                'total_count': model_health['total_count'],
-                'overall': model_health['overall']
-            },
+            'models': (
+                {
+                    'ready_count': model_health['ready_count'],
+                    'total_count': model_health['total_count'],
+                    'overall': model_health['overall']
+                }
+                if model_health is not None
+                else {'overall': 'skipped'}
+            ),
             'timestamp': time.time()
         }), status_code
         

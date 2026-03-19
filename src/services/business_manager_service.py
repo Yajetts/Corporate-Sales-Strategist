@@ -96,18 +96,15 @@ class BusinessManagerService:
         start_time = time.time()
         
         if not self.model_loaded:
-            # Use rule-based fallback for demo purposes
-            return self._generate_fallback_optimization(
-                product_portfolio=product_portfolio,
-                constraints=constraints,
-                revenue_weight=revenue_weight,
-                cost_weight=cost_weight,
-                start_time=start_time
-            )
+            raise ValueError("Model not loaded")
         
         # Validate input
         if not product_portfolio or len(product_portfolio) == 0:
             raise ValueError("product_portfolio cannot be empty")
+
+        # Normalize legacy/dashboard payloads to the schema expected by the optimizer.
+        # Dashboard sample JSON often uses keys like "demand" and "cost".
+        product_portfolio = self._normalize_product_portfolio(product_portfolio)
         
         # Extract product data
         n_products = len(product_portfolio)
@@ -191,6 +188,54 @@ class BusinessManagerService:
         }
         
         return response
+
+    @staticmethod
+    def _normalize_product_portfolio(product_portfolio: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def to_float(value: Any, default: float = 0.0) -> float:
+            try:
+                if value is None:
+                    return default
+                if isinstance(value, (int, float)):
+                    return float(value)
+                if isinstance(value, str) and value.strip() == "":
+                    return default
+                return float(value)
+            except Exception:
+                return default
+
+        normalized: List[Dict[str, Any]] = []
+        for product in product_portfolio or []:
+            if not isinstance(product, dict):
+                continue
+
+            p = dict(product)
+
+            # Name variants
+            p.setdefault('name', p.get('product_name') or p.get('product') or 'Unnamed')
+
+            # Demand: dashboard uses "demand"; backend uses "demand_forecast"
+            p['demand_forecast'] = to_float(p.get('demand_forecast'), to_float(p.get('demand'), 0.0))
+
+            # Cost: dashboard uses "cost"; backend uses "production_cost"
+            p['production_cost'] = to_float(p.get('production_cost'), to_float(p.get('cost'), 0.0))
+
+            # Inventory: accept several variants
+            p['current_inventory'] = to_float(
+                p.get('current_inventory'),
+                to_float(p.get('inventory'), to_float(p.get('inventory_level'), 0.0)),
+            )
+
+            # Ensure sales_history exists (optimizer expects it)
+            if 'sales_history' not in p or p.get('sales_history') is None:
+                p['sales_history'] = [p['demand_forecast']]
+
+            # Price is optional but helpful for UI/resource matrix
+            if 'price' in p:
+                p['price'] = to_float(p.get('price'), 0.0)
+
+            normalized.append(p)
+
+        return normalized
     
     def analyze_scenarios(
         self,
@@ -332,7 +377,14 @@ class BusinessManagerService:
                 'quantity': float(quantity),
                 'percentage': float(quantity / total_quantity * 100) if total_quantity > 0 else 0,
                 'estimated_cost': float(quantity * product.get('production_cost', 1.0)),
-                'estimated_revenue': float(quantity * product.get('demand_forecast', 0))
+                # Prefer explicit unit price if provided; otherwise fall back to demand_forecast.
+                'estimated_revenue': float(
+                    quantity * (
+                        product.get('price')
+                        if product.get('price') is not None
+                        else product.get('demand_forecast', 0)
+                    )
+                )
             }
         
         return {
@@ -362,7 +414,13 @@ class BusinessManagerService:
                 'recommended_quantity': float(optimal_quantities[idx]),
                 'demand_forecast': product_data.get('demand_forecast', 0),
                 'production_cost': product_data.get('production_cost', 1.0),
-                'priority_score': float(optimal_quantities[idx] * product_data.get('demand_forecast', 0))
+                'priority_score': float(optimal_quantities[idx] * product_data.get('demand_forecast', 0)),
+                # UI-friendly aliases (backward compatible)
+                'name': product_name,
+                'quantity': float(optimal_quantities[idx]),
+                'demand': product_data.get('demand_forecast', 0),
+                'cost': product_data.get('production_cost', 1.0),
+                'price': product_data.get('price', 0)
             })
         
         return priorities

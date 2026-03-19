@@ -22,14 +22,22 @@ def make_celery(app_name='sales_strategist'):
     broker_url = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
     result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
     
+    include_modules = [
+        'src.post_analysis.celery_tasks',
+    ]
+
+    # Core task module pulls in heavier dependencies (e.g., numpy/torch).
+    # Allow a minimal worker image to opt out.
+    include_core_tasks = os.getenv('CELERY_INCLUDE_CORE_TASKS', '1').strip().lower() not in {'0', 'false', 'no'}
+    if include_core_tasks:
+        include_modules.insert(0, 'src.api.tasks')
+
     # Create Celery instance
     celery_app = Celery(
         app_name,
         broker=broker_url,
         backend=result_backend,
-        include=[
-            'src.api.tasks'
-        ]
+        include=include_modules,
     )
     
     # Configure Celery
@@ -53,6 +61,8 @@ def make_celery(app_name='sales_strategist'):
             'src.api.tasks.monitor_performance_async': {'queue': 'monitoring'},
             'src.api.tasks.optimize_business_async': {'queue': 'optimization'},
             'src.api.tasks.explain_model_async': {'queue': 'explanation'},
+            'src.post_analysis.celery_tasks.generate_analysis_overview_async': {'queue': 'post_analysis'},
+            'src.post_analysis.celery_tasks.generate_podcast_summary_async': {'queue': 'post_analysis'},
         },
         
         # Task time limits
@@ -89,6 +99,7 @@ def make_celery(app_name='sales_strategist'):
         Queue('monitoring', Exchange('monitoring'), routing_key='monitoring'),
         Queue('optimization', Exchange('optimization'), routing_key='optimization'),
         Queue('explanation', Exchange('explanation'), routing_key='explanation'),
+        Queue('post_analysis', Exchange('post_analysis'), routing_key='post_analysis'),
     )
     
     logger.info(f"Celery app configured with broker: {broker_url}")

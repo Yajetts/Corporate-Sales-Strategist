@@ -2,9 +2,10 @@
 
 import os
 import logging
+import time
 from typing import Optional
 from contextlib import contextmanager
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.pool import QueuePool
@@ -16,6 +17,16 @@ logger = logging.getLogger(__name__)
 
 # SQLAlchemy Base
 Base = declarative_base()
+
+
+def databases_disabled() -> bool:
+    """Return True when DB connections should be skipped entirely.
+
+    This is meant for local/dev runs where Docker/DBs are unavailable or
+    intentionally not used.
+    """
+    value = os.getenv('DB_INIT_DISABLE', '').strip().lower()
+    return value in {'1', 'true', 'yes'}
 
 
 # Database Models
@@ -124,41 +135,76 @@ class PostgreSQLManager:
         """Initialize database connection and create tables"""
         if self._initialized:
             return
-        
-        try:
-            # Build connection string
-            host = os.getenv('POSTGRES_HOST', 'localhost')
-            port = os.getenv('POSTGRES_PORT', '5432')
-            database = os.getenv('POSTGRES_DB', 'sales_strategist')
-            user = os.getenv('POSTGRES_USER', 'postgres')
-            password = os.getenv('POSTGRES_PASSWORD', 'postgres')
-            
-            connection_string = f'postgresql://{user}:{password}@{host}:{port}/{database}'
-            
-            # Create engine with connection pooling
-            self.engine = create_engine(
-                connection_string,
-                poolclass=QueuePool,
-                pool_size=10,
-                max_overflow=20,
-                pool_pre_ping=True,  # Verify connections before using
-                pool_recycle=3600,  # Recycle connections after 1 hour
-                echo=False
-            )
-            
-            # Create session factory
-            self.session_factory = sessionmaker(bind=self.engine)
-            self.Session = scoped_session(self.session_factory)
-            
-            # Create tables
-            Base.metadata.create_all(self.engine)
-            
-            self._initialized = True
-            logger.info(f"PostgreSQL connection initialized: {host}:{port}/{database}")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize PostgreSQL connection: {e}")
-            raise
+
+        if databases_disabled():
+            raise RuntimeError("PostgreSQL initialization disabled (DB_INIT_DISABLE=1)")
+
+        # Build connection string
+        host = os.getenv('POSTGRES_HOST', 'localhost')
+        port = os.getenv('POSTGRES_PORT', '5432')
+        database = os.getenv('POSTGRES_DB', 'sales_strategist')
+        user = os.getenv('POSTGRES_USER', 'postgres')
+        password = os.getenv('POSTGRES_PASSWORD', 'postgres')
+
+        connection_string = f'postgresql://{user}:{password}@{host}:{port}/{database}'
+
+        # Keep local dev failure fast when Postgres isn't running.
+        # psycopg2 uses seconds for connect_timeout.
+        connect_timeout_s = int(os.getenv('POSTGRES_CONNECT_TIMEOUT_SECONDS', '3'))
+
+        retries = int(os.getenv('DB_INIT_RETRIES', '3'))
+        delay_s = float(os.getenv('DB_INIT_RETRY_DELAY_SECONDS', '1.0'))
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, retries + 1):
+            try:
+                # Create engine with connection pooling
+                self.engine = create_engine(
+                    connection_string,
+                    poolclass=QueuePool,
+                    pool_size=10,
+                    max_overflow=20,
+                    pool_pre_ping=True,  # Verify connections before using
+                    pool_recycle=3600,  # Recycle connections after 1 hour
+                    connect_args={"connect_timeout": connect_timeout_s},
+                    echo=False
+                )
+
+                # Create session factory
+                self.session_factory = sessionmaker(bind=self.engine)
+                self.Session = scoped_session(self.session_factory)
+
+                # Create tables (forces an actual connection)
+                Base.metadata.create_all(self.engine)
+
+                self._initialized = True
+                logger.info(f"PostgreSQL connection initialized: {host}:{port}/{database}")
+                return
+            except Exception as e:
+                last_error = e
+
+                # Add a single actionable hint for the most common local-dev failure mode.
+                if attempt == 1:
+                    message = str(e)
+                    is_localhost = host in {'localhost', '127.0.0.1', '::1'}
+                    is_conn_refused = 'Connection refused' in message or '10061' in message
+                    if is_localhost and is_conn_refused:
+                        logger.warning(
+                            "PostgreSQL connection refused. If you're running locally, "
+                            "start Docker Desktop and run: docker compose up -d postgres. "
+                            "Also confirm POSTGRES_PORT in .env matches the compose port mapping."
+                        )
+
+                if attempt < retries:
+                    logger.warning(
+                        f"PostgreSQL init failed (attempt {attempt}/{retries}) at {host}:{port}. "
+                        f"Retrying in {delay_s}s: {e}"
+                    )
+                    time.sleep(delay_s)
+                else:
+                    logger.error(f"Failed to initialize PostgreSQL connection: {e}")
+
+        raise last_error  # type: ignore[misc]
     
     @contextmanager
     def get_session(self):
@@ -200,11 +246,13 @@ class PostgreSQLManager:
             True if healthy, False otherwise
         """
         try:
+            if databases_disabled():
+                return False
             if not self._initialized:
                 self.initialize()
             
             with self.get_session() as session:
-                session.execute('SELECT 1')
+                session.execute(text('SELECT 1'))
             return True
         except Exception as e:
             logger.error(f"PostgreSQL health check failed: {e}")
@@ -226,43 +274,82 @@ class MongoDBManager:
         """Initialize MongoDB connection"""
         if self._initialized:
             return
-        
-        try:
-            # Build connection string
-            host = os.getenv('MONGODB_HOST', 'localhost')
-            port = int(os.getenv('MONGODB_PORT', '27017'))
-            database = os.getenv('MONGODB_DB', 'sales_strategist')
-            
-            # Optional authentication
-            username = os.getenv('MONGODB_USER')
-            password = os.getenv('MONGODB_PASSWORD')
-            
-            if username and password:
-                connection_string = f'mongodb://{username}:{password}@{host}:{port}/{database}'
-            else:
-                connection_string = f'mongodb://{host}:{port}/{database}'
-            
-            # Create client with connection pooling
-            self.client = MongoClient(
-                connection_string,
-                maxPoolSize=50,
-                minPoolSize=10,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=10000
+
+        if databases_disabled():
+            raise RuntimeError("MongoDB initialization disabled (DB_INIT_DISABLE=1)")
+
+        # Build connection string
+        host = os.getenv('MONGODB_HOST', 'localhost')
+        port = int(os.getenv('MONGODB_PORT', '27017'))
+        database = os.getenv('MONGODB_DB', 'sales_strategist')
+
+        # Optional authentication
+        username = os.getenv('MONGODB_USER')
+        password = os.getenv('MONGODB_PASSWORD')
+        auth_source = os.getenv('MONGODB_AUTH_SOURCE', 'admin')
+
+        if username and password:
+            # Docker's MONGO_INITDB_ROOT_USERNAME/PASSWORD authenticates against the 'admin' database.
+            # If authSource isn't specified, PyMongo may try to authenticate against the target database
+            # (e.g. sales_strategist) and fail.
+            connection_string = (
+                f'mongodb://{username}:{password}@{host}:{port}/{database}'
+                f'?authSource={auth_source}'
             )
-            
-            # Get database
-            self.db = self.client[database]
-            
-            # Test connection
-            self.client.admin.command('ping')
-            
-            self._initialized = True
-            logger.info(f"MongoDB connection initialized: {host}:{port}/{database}")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize MongoDB connection: {e}")
-            raise
+        else:
+            connection_string = f'mongodb://{host}:{port}/{database}'
+
+        retries = int(os.getenv('DB_INIT_RETRIES', '3'))
+        delay_s = float(os.getenv('DB_INIT_RETRY_DELAY_SECONDS', '1.0'))
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, retries + 1):
+            try:
+                self.client = MongoClient(
+                    connection_string,
+                    maxPoolSize=50,
+                    minPoolSize=10,
+                    serverSelectionTimeoutMS=int(os.getenv('MONGODB_SERVER_SELECTION_TIMEOUT_MS', '3000')),
+                    connectTimeoutMS=int(os.getenv('MONGODB_CONNECT_TIMEOUT_MS', '3000')),
+                )
+
+                # Force a ping to validate connectivity
+                self.client.admin.command('ping')
+                self.db = self.client[database]
+
+                self._initialized = True
+                logger.info(f"MongoDB connection initialized: {host}:{port}/{database}")
+                return
+            except Exception as e:
+                last_error = e
+
+                if attempt == 1:
+                    message = str(e)
+                    is_localhost = host in {'localhost', '127.0.0.1', '::1'}
+                    is_conn_refused = 'Connection refused' in message or 'ECONNREFUSED' in message
+                    if is_localhost and is_conn_refused:
+                        logger.warning(
+                            "MongoDB connection refused. If you're running locally, "
+                            "start Docker Desktop and run: docker compose up -d mongodb."
+                        )
+
+                try:
+                    if self.client is not None:
+                        self.client.close()
+                finally:
+                    self.client = None
+                    self.db = None
+
+                if attempt < retries:
+                    logger.warning(
+                        f"MongoDB init failed (attempt {attempt}/{retries}) at {host}:{port}. "
+                        f"Retrying in {delay_s}s: {e}"
+                    )
+                    time.sleep(delay_s)
+                else:
+                    logger.error(f"Failed to initialize MongoDB connection: {e}")
+
+        raise last_error  # type: ignore[misc]
     
     def get_collection(self, collection_name: str):
         """
@@ -294,6 +381,8 @@ class MongoDBManager:
             True if healthy, False otherwise
         """
         try:
+            if databases_disabled():
+                return False
             if not self._initialized:
                 self.initialize()
             
@@ -694,13 +783,22 @@ class UserConfigurationRepository:
 # Initialize databases on module import
 def initialize_databases():
     """Initialize all database connections"""
+    if databases_disabled():
+        logger.info("Database initialization disabled via DB_INIT_DISABLE=1")
+        return False
+
+    strict = os.getenv('DB_INIT_STRICT', '0').strip().lower() in {'1', 'true', 'yes'}
     try:
         postgres_manager.initialize()
         mongodb_manager.initialize()
         logger.info("All database connections initialized successfully")
+        return True
     except Exception as e:
-        logger.error(f"Failed to initialize databases: {e}")
-        raise
+        if strict:
+            logger.error(f"Failed to initialize databases: {e}")
+            raise
+        logger.warning(f"Database initialization skipped/unavailable: {e}")
+        return False
 
 
 # Cleanup function

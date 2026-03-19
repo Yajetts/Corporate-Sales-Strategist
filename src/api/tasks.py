@@ -253,8 +253,15 @@ def optimize_business_async(
     """
     try:
         logger.info(f"Starting async business optimization (task_id: {self.request.id}, products: {len(product_portfolio)})")
-        
-        service = BusinessManagerService()
+
+        import os
+        default_model_path = os.getenv(
+            'BUSINESS_OPTIMIZER_MODEL_PATH',
+            'models/checkpoints/business_optimizer/final_model.pt'
+        )
+        service = BusinessManagerService(
+            model_path=default_model_path if os.path.exists(default_model_path) else None
+        )
         
         result = service.optimize_business(
             product_portfolio=product_portfolio,
@@ -349,6 +356,13 @@ def explain_model_async(
         # Add task metadata
         result['task_id'] = self.request.id
         result['completed_at'] = datetime.utcnow().isoformat()
+
+        # Cache for post-analysis collection (works even when DB is down)
+        try:
+            from src.post_analysis.storage.module_output_store import ModuleOutputStore
+            ModuleOutputStore().write_latest("shap", task_id=self.request.id, payload=result)
+        except Exception as cache_error:
+            logger.debug(f"Failed to cache SHAP output for post-analysis: {cache_error}")
         
         logger.info(f"Model explanation completed (task_id: {self.request.id})")
         return result

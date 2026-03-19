@@ -105,12 +105,20 @@ class StrategyEngineService:
         
         # Validate market state
         self._validate_market_state(market_state)
-        
-        # Get strategy from RL agent
-        action, strategy_info = self.agent.predict_strategy(
-            market_state=market_state,
-            deterministic=deterministic
-        )
+
+        # Get strategy from RL agent (or fallback heuristics if no checkpoint)
+        strategy_info: Dict[str, Any]
+        try:
+            if getattr(self.agent, 'model', None) is None:
+                strategy_info = self._generate_heuristic_strategy_info(market_state)
+            else:
+                _, strategy_info = self.agent.predict_strategy(
+                    market_state=market_state,
+                    deterministic=deterministic
+                )
+        except ValueError:
+            # StrategyAgent raises when the model isn't trained/loaded.
+            strategy_info = self._generate_heuristic_strategy_info(market_state)
         
         # Calculate confidence score
         confidence = strategy_info['confidence']
@@ -148,6 +156,70 @@ class StrategyEngineService:
             self._add_to_cache(cache_key, strategy)
         
         return strategy
+
+    @staticmethod
+    def _clamp(value: float, min_value: float, max_value: float) -> float:
+        return max(min_value, min(max_value, value))
+
+    def _generate_heuristic_strategy_info(self, market_state: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate a reasonable strategy without a trained RL checkpoint.
+
+        This keeps the dashboard functional in dev/demo environments where
+        `models/checkpoints/strategy_agent/*.zip` is not present.
+        """
+        competitor_prices = market_state.get('competitor_prices') or []
+        try:
+            competitor_prices = [float(x) for x in competitor_prices]
+        except Exception:
+            competitor_prices = []
+
+        avg_competitor_price = float(np.mean(competitor_prices)) if competitor_prices else 0.7
+
+        market_demand = float(market_state.get('market_demand', 0.5))
+        sales_volume = float(market_state.get('sales_volume', 0.5))
+        conversion_rate = float(market_state.get('conversion_rate', 0.5))
+        inventory_level = float(market_state.get('inventory_level', 0.5))
+        market_trend = float(market_state.get('market_trend', 0.0))
+
+        demand_factor = self._clamp((market_demand - 0.5) * 2.0, -1.0, 1.0)
+        trend_factor = self._clamp(market_trend, -1.0, 1.0)
+        inventory_factor = self._clamp((0.5 - inventory_level) * 2.0, -1.0, 1.0)
+        competitor_factor = self._clamp((avg_competitor_price - 0.6) / 0.4, -1.0, 1.0)
+
+        raw_price_adj = (
+            10.0 * demand_factor +
+            5.0 * trend_factor +
+            8.0 * inventory_factor +
+            3.0 * competitor_factor
+        )
+        price_adjustment_pct = self._clamp(raw_price_adj, -20.0, 20.0)
+
+        approach_score = demand_factor + 0.6 * trend_factor + 0.2 * (sales_volume - 0.5)
+        if approach_score >= 0.4:
+            sales_approach = 'aggressive'
+        elif approach_score <= -0.4:
+            sales_approach = 'conservative'
+        else:
+            sales_approach = 'moderate'
+
+        # Promote more when conversion is low or inventory is high.
+        promo_raw = (
+            0.45 +
+            0.25 * (inventory_level - 0.5) +
+            0.35 * (0.3 - conversion_rate) +
+            0.10 * (-trend_factor)
+        )
+        promotion_intensity = self._clamp(promo_raw, 0.0, 1.0)
+
+        # Low confidence because this is a heuristic fallback.
+        confidence = 0.4
+
+        return {
+            'price_adjustment_pct': float(price_adjustment_pct),
+            'sales_approach': sales_approach,
+            'promotion_intensity': float(promotion_intensity),
+            'confidence': float(confidence)
+        }
     
     def compare_strategies(
         self,

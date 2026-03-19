@@ -1,16 +1,40 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Sales Strategist{% endblock %}
+{% block title %}AI Sales Strategist - Dashboard{% endblock %}
 
 {% block content %}
 <div class="row">
     <div class="col-12">
         <h1 class="mb-4">Sales Strategist Dashboard</h1>
         <p class="lead">Welcome to the Enterprise Sales Strategist platform</p>
+
+                {% if overview_locked %}
+                <div class="alert alert-warning">
+                        Analysis Overview is available only after all modules have produced outputs.
+                </div>
+                {% endif %}
     </div>
 </div>
 
 <div class="row g-4">
+    <!-- Enterprise Analyst Card -->
+    <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm hover-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-3">
+                    <div class="icon-box bg-dark text-white rounded-circle p-3 me-3">
+                        <i class="bi bi-building fs-4"></i>
+                    </div>
+                    <h5 class="card-title mb-0">Enterprise Analyst</h5>
+                </div>
+                <p class="card-text">Analyze company or product text to extract category, domain, and key features.</p>
+                <a href="{{ url_for('dashboard.enterprise') }}" class="btn btn-dark">
+                    Analyze <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
     <!-- Market Analysis Card -->
     <div class="col-md-6 col-lg-4">
         <div class="card h-100 shadow-sm hover-card">

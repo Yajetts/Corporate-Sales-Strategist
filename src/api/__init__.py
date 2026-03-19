@@ -1,6 +1,8 @@
-"""REST API endpoints and gateway"""
+"""REST API package.
 
-from src.api.app import app, create_app
-from src.api.routes import api_bp
+Intentionally avoids importing the Flask app at import time to prevent circular
+imports (e.g., modules that only need database utilities importing
+`src.api.database`).
+"""
 
-__all__ = ['app', 'create_app', 'api_bp']
+__all__ = []

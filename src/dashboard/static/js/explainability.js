@@ -5,6 +5,31 @@
 let currentExplanationData = null;
 let featureImportanceChart = null;
 
+function normalizeExplanationForUI(data) {
+    if (!data || typeof data !== 'object') return data;
+    if (data.shap_values && typeof data.shap_values === 'object') return data;
+
+    const shapValues = {};
+    if (Array.isArray(data.top_features)) {
+        data.top_features.forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const name = item.feature;
+            if (!name) return;
+
+            // Local explanations use `shap_value`, global uses `importance`.
+            const value = (item.shap_value ?? item.importance ?? 0);
+            const numeric = (typeof value === 'number') ? value : Number(value);
+            shapValues[String(name)] = Number.isFinite(numeric) ? numeric : 0;
+        });
+    }
+
+    return {
+        ...data,
+        shap_values: shapValues,
+        feature_values: data.feature_values || {},
+    };
+}
+
 // Form submission
 document.getElementById('explainabilityForm').addEventListener('submit', async function(e) {
     e.preventDefault();
@@ -32,10 +57,15 @@ document.getElementById('explainabilityForm').addEventListener('submit', async f
         }
         
         // Call API
-        const result = await apiClient.getExplanation(modelType, predictionData, predictionData);
-        
-        // Display results
-        displayResults(result, explanationType);
+        // - local: predictionData is an array -> instance
+        // - global: predictionData is a 2D array -> background_data
+        const result = await apiClient.getExplanation(modelType, predictionData, {
+            explanationType: explanationType
+        });
+
+        // Display results (normalize API response to UI chart expectations)
+        const normalized = normalizeExplanationForUI(result);
+        displayResults(normalized, explanationType);
         
         showSuccess('alertContainer', 'Explanation generated successfully!');
         
@@ -50,13 +80,37 @@ document.getElementById('explainabilityForm').addEventListener('submit', async f
 async function loadSampleExplanation() {
     try {
         showLoading('alertContainer');
-        
-        // Generate sample SHAP data
-        const sampleData = generateSampleSHAPData();
-        
-        displayResults(sampleData, 'local');
-        
-        showSuccess('alertContainer', 'Sample explanation loaded successfully!');
+
+        const modelType = document.getElementById('modelType').value;
+        const explanationType = document.getElementById('explanationType').value;
+
+        // Fetch schema + examples from backend so the sample is valid for the current model.
+        const schema = await apiClient.get('/explain/schema', { useCache: false });
+        const modelSchema = schema && schema[modelType] ? schema[modelType] : null;
+        if (!modelSchema) {
+            throw new Error(`No sample schema available for model_type=${modelType}`);
+        }
+
+        const samplePayload = (explanationType === 'global')
+            ? modelSchema.background_data_example
+            : modelSchema.instance_example;
+
+        // Populate the textarea so users can see/edit what got sent.
+        document.getElementById('predictionData').value = JSON.stringify(samplePayload, null, 2);
+
+        // Call API and render a real explanation (this also updates the post-analysis cache).
+        const result = await apiClient.getExplanation(modelType, samplePayload, {
+            explanationType: explanationType
+        });
+
+        const normalized = normalizeExplanationForUI(result);
+        displayResults(normalized, explanationType);
+
+        if (modelSchema.status && modelSchema.status !== 'ready') {
+            showSuccess('alertContainer', 'Sample loaded. Note: model reported not ready; output may be fallback/limited.');
+        } else {
+            showSuccess('alertContainer', 'Sample loaded and explained successfully!');
+        }
         
     } catch (error) {
         showError('alertContainer', 'Failed to load sample explanation', error.message);

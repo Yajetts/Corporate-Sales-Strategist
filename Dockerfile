@@ -5,6 +5,10 @@ FROM python:3.10-slim as base
 # Set working directory
 WORKDIR /app
 
+# Some base images/environments can have pip configured with require-hashes.
+# Disable it for this image build.
+ENV PIP_REQUIRE_HASHES=0
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -13,10 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file
-COPY requirements.txt .
+COPY requirements.docker.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.docker.txt
 
 # Stage 2: Production image
 FROM python:3.10-slim as production
@@ -26,6 +30,7 @@ WORKDIR /app
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from base stage
@@ -34,12 +39,10 @@ COPY --from=base /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY src/ ./src/
-COPY data/ ./data/
-COPY models/ ./models/
 COPY scripts/ ./scripts/
 
 # Create necessary directories
-RUN mkdir -p logs models/checkpoints
+RUN mkdir -p logs models/checkpoints data
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
