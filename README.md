@@ -14,7 +14,7 @@ Sales organizations often face avoidable losses due to:
 
 Corporate Sales Strategist addresses these gaps by coordinating six domain modules and a post-analysis layer that produces executive-ready outputs.
 
-![Uploading image.png…]()
+<img width="1918" height="978" alt="css image" src="https://github.com/user-attachments/assets/5dc415c8-7556-4a9f-8317-b7e8c103f84b" />
 
 
 ## Core Modules
